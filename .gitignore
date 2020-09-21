@@ -17,4 +17,4 @@
 # Projects
 .idea
 .vscode
-config.yaml
+config/*.yaml
