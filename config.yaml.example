@@ -1,0 +1,13 @@
+source:
+  url: root:xxx@(127.0.0.1:3306)/xxx?charset=utf8mb4&parseTime=true
+
+target:
+  url: root:xxx@(127.0.0.1:3306)/xxx_target?charset=utf8mb4&parseTime=true
+
+tables:
+  repos:
+    - id
+    - title
+  developer:
+    - id
+    - login
