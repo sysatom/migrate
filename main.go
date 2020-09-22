@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"strings"
@@ -11,7 +12,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-const PageLimit = 1000
+const PageLimit = 10000
 
 type Total struct {
 	Number int `db:"num"`
@@ -73,9 +74,9 @@ func main() {
 			}
 
 			// sql
-			fieldsNameFragment := ""
-			fieldsValueFragment := ""
-			fieldsWhereFragment := ""
+			fieldsNameFragment := bytes.Buffer{}
+			fieldsValueFragment := bytes.Buffer{}
+			fieldsWhereFragment := bytes.Buffer{}
 
 			f := fields.([]interface{})
 			for _, i := range f {
@@ -83,14 +84,26 @@ func main() {
 					continue
 				}
 
-				fieldsNameFragment += i.(string) + ","
-				fieldsValueFragment += ":" + i.(string) + ","
-				fieldsWhereFragment += " `" + i.(string) + "` = :" + i.(string) + " AND"
+				// field,
+				fieldsNameFragment.WriteString(i.(string))
+				fieldsNameFragment.WriteString(",")
+
+				// :field,
+				fieldsValueFragment.WriteString(":")
+				fieldsValueFragment.WriteString(i.(string))
+				fieldsValueFragment.WriteString(",")
+
+				// `field` = :field AND
+				fieldsWhereFragment.WriteString(" `")
+				fieldsWhereFragment.WriteString(i.(string))
+				fieldsWhereFragment.WriteString("` = :")
+				fieldsWhereFragment.WriteString(i.(string))
+				fieldsWhereFragment.WriteString(" AND")
 			}
 
-			fieldsNameFragment = strings.TrimRight(fieldsNameFragment, ",")
-			fieldsValueFragment = strings.TrimRight(fieldsValueFragment, ",")
-			fieldsWhereFragment = strings.TrimRight(fieldsWhereFragment, "AND")
+			fieldsNameFragmentStr := strings.TrimRight(fieldsNameFragment.String(), ",")
+			fieldsValueFragmentStr := strings.TrimRight(fieldsValueFragment.String(), ",")
+			fieldsWhereFragmentStr := strings.TrimRight(fieldsWhereFragment.String(), "AND")
 
 			// Foreach
 			for rows.Next() {
@@ -125,9 +138,12 @@ func main() {
 					}
 				}
 
-				// exist
-				existSQL := "SELECT COUNT(*) as num FROM %s WHERE %s"
-				existRows, err := targetDB.NamedQuery(fmt.Sprintf(existSQL, table, fieldsWhereFragment), insertValue)
+				// exist SELECT COUNT(*) as num FROM %s WHERE %s
+				existSQL := bytes.NewBufferString("SELECT COUNT(*) as num FROM ")
+				existSQL.WriteString(table)
+				existSQL.WriteString(" WHERE ")
+				existSQL.WriteString(fieldsWhereFragmentStr)
+				existRows, err := targetDB.NamedQuery(existSQL.String(), insertValue)
 				if err != nil {
 					fmt.Println(err)
 					continue
@@ -143,9 +159,15 @@ func main() {
 					}
 				}
 
-				// insert
-				insertSQL := "INSERT INTO %s (%s) VALUES (%s)"
-				_, err = targetDB.NamedExec(fmt.Sprintf(insertSQL, table, fieldsNameFragment, fieldsValueFragment), insertValue)
+				// insert INSERT INTO %s (%s) VALUES (%s)
+				insertSQL := bytes.NewBufferString("INSERT INTO ")
+				insertSQL.WriteString(table)
+				insertSQL.WriteString(" (")
+				insertSQL.WriteString(fieldsNameFragmentStr)
+				insertSQL.WriteString(") VALUES (")
+				insertSQL.WriteString(fieldsValueFragmentStr)
+				insertSQL.WriteString(")")
+				_, err = targetDB.NamedExec(insertSQL.String(), insertValue)
 				if err != nil {
 					fmt.Println(err)
 				}
