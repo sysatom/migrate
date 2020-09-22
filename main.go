@@ -84,9 +84,10 @@ func main() {
 					continue
 				}
 
-				// field,
+				// `field`,
+				fieldsNameFragment.WriteString("`")
 				fieldsNameFragment.WriteString(i.(string))
-				fieldsNameFragment.WriteString(",")
+				fieldsNameFragment.WriteString("`,")
 
 				// `field` = :field AND
 				fieldsWhereFragment.WriteString(" `")
@@ -187,7 +188,10 @@ func main() {
 					values = append(values, item...)
 				}
 				insertSQLStr := strings.TrimRight(insertSQL.String(), ",")
-				stmt, _ := targetDB.Prepare(insertSQLStr)
+				stmt, err := targetDB.Prepare(insertSQLStr)
+				if err != nil {
+					fmt.Println(err)
+				}
 
 				_, err = stmt.Exec(values...)
 				_ = stmt.Close()
