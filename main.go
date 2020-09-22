@@ -4,19 +4,22 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 	"github.com/spf13/viper"
 )
 
-const PageLimit = 10000
+const PageLimit = 1000
 
 type Total struct {
 	Number int `db:"num"`
 }
 
 func main() {
+	migrateStartTime := time.Now()
+
 	viper.SetConfigName("migrate")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(".")
@@ -43,6 +46,7 @@ func main() {
 
 	tables := viper.GetStringMap("tables")
 	for table, fields := range tables {
+		tableStartTime := time.Now()
 		// Total
 		pageRow := sourceDB.QueryRowx(fmt.Sprintf("SELECT COUNT(*) as num FROM %s", table))
 		total := Total{}
@@ -58,6 +62,8 @@ func main() {
 		// Page
 		page := int(math.Ceil(float64(total.Number) / float64(PageLimit)))
 		for p := 1; p <= page; p++ {
+			pageStartTime := time.Now()
+
 			fmt.Println("🦑", p, "/", page, table)
 			offset := (p - 1) * PageLimit
 			rows, err := sourceDB.Queryx(fmt.Sprintf("SELECT * FROM %s LIMIT %d, %d", table, offset, PageLimit))
@@ -133,7 +139,6 @@ func main() {
 						fmt.Println(err)
 					}
 					if v[0].(int64) > 0 {
-						fmt.Println("exist")
 						continue
 					}
 				}
@@ -147,6 +152,16 @@ func main() {
 			}
 
 			_ = rows.Close()
+
+			pageEndTime := time.Now()
+			fmt.Println("🕒", pageEndTime.Sub(pageStartTime))
 		}
+
+		tableEndTime := time.Now()
+		fmt.Println("🕒", table, tableEndTime.Sub(tableStartTime))
 	}
+
+	fmt.Println("All Done")
+	migrateEndTime := time.Now()
+	fmt.Println("🕒", "Total", migrateEndTime.Sub(migrateStartTime))
 }
