@@ -12,7 +12,8 @@ import (
 	"github.com/spf13/viper"
 )
 
-const PageLimit = 10000
+const PageLimit = 1000
+const CheckExist = false
 
 type Total struct {
 	Number int `db:"num"`
@@ -75,7 +76,6 @@ func main() {
 
 			// sql
 			fieldsNameFragment := bytes.Buffer{}
-			fieldsValueFragment := bytes.Buffer{}
 			fieldsWhereFragment := bytes.Buffer{}
 
 			f := fields.([]interface{})
@@ -88,11 +88,6 @@ func main() {
 				fieldsNameFragment.WriteString(i.(string))
 				fieldsNameFragment.WriteString(",")
 
-				// :field,
-				fieldsValueFragment.WriteString(":")
-				fieldsValueFragment.WriteString(i.(string))
-				fieldsValueFragment.WriteString(",")
-
 				// `field` = :field AND
 				fieldsWhereFragment.WriteString(" `")
 				fieldsWhereFragment.WriteString(i.(string))
@@ -102,8 +97,9 @@ func main() {
 			}
 
 			fieldsNameFragmentStr := strings.TrimRight(fieldsNameFragment.String(), ",")
-			fieldsValueFragmentStr := strings.TrimRight(fieldsValueFragment.String(), ",")
 			fieldsWhereFragmentStr := strings.TrimRight(fieldsWhereFragment.String(), "AND")
+
+			var insertData [][]interface{}
 
 			// Foreach
 			for rows.Next() {
@@ -124,6 +120,7 @@ func main() {
 					m[col] = val
 				}
 
+				var insertItems []interface{}
 				insertValue := make(map[string]interface{})
 				f := fields.([]interface{})
 				for _, i := range f {
@@ -133,54 +130,78 @@ func main() {
 					if m[i.(string)] != nil {
 						v := *m[i.(string)].(*interface{})
 						insertValue[i.(string)] = v
+						insertItems = append(insertItems, v)
 					} else {
 						insertValue[i.(string)] = nil
+						insertItems = append(insertItems, nil)
 					}
 				}
 
 				// exist SELECT COUNT(*) as num FROM %s WHERE %s
-				existSQL := bytes.NewBufferString("SELECT COUNT(*) as num FROM ")
-				existSQL.WriteString(table)
-				existSQL.WriteString(" WHERE ")
-				existSQL.WriteString(fieldsWhereFragmentStr)
-				existRows, err := targetDB.NamedQuery(existSQL.String(), insertValue)
-				if err != nil {
-					fmt.Println(err)
-					continue
-				}
-				if existRows.Next() {
-					v, err := existRows.SliceScan()
-					_ = existRows.Close()
+				if CheckExist {
+					existSQL := bytes.NewBufferString("SELECT COUNT(*) as num FROM ")
+					existSQL.WriteString(table)
+					existSQL.WriteString(" WHERE ")
+					existSQL.WriteString(fieldsWhereFragmentStr)
+					existRows, err := targetDB.NamedQuery(existSQL.String(), insertValue)
 					if err != nil {
 						fmt.Println(err)
-					}
-					if v[0].(int64) > 0 {
 						continue
+					}
+					if existRows.Next() {
+						v, err := existRows.SliceScan()
+						_ = existRows.Close()
+						if err != nil {
+							fmt.Println(err)
+						}
+						if v[0].(int64) > 0 {
+							continue
+						}
 					}
 				}
 
-				// insert INSERT INTO %s (%s) VALUES (%s)
+				// Insert Data
+				insertData = append(insertData, insertItems)
+			}
+			_ = rows.Close()
+
+			// Batch Insert
+			if len(insertData) > 0 {
 				insertSQL := bytes.NewBufferString("INSERT INTO ")
 				insertSQL.WriteString(table)
-				insertSQL.WriteString(" (")
+				insertSQL.WriteString("(")
 				insertSQL.WriteString(fieldsNameFragmentStr)
-				insertSQL.WriteString(") VALUES (")
-				insertSQL.WriteString(fieldsValueFragmentStr)
-				insertSQL.WriteString(")")
-				_, err = targetDB.NamedExec(insertSQL.String(), insertValue)
+				insertSQL.WriteString(") VALUES ")
+				var values []interface{}
+
+				temp := ""
+				for i := 0; i < len(insertData[0]); i++ {
+					temp += "?,"
+				}
+				temp = strings.TrimRight(temp, ",")
+
+				for _, item := range insertData {
+					insertSQL.WriteString("(")
+					insertSQL.WriteString(temp)
+					insertSQL.WriteString("),")
+					values = append(values, item...)
+				}
+				insertSQLStr := strings.TrimRight(insertSQL.String(), ",")
+				stmt, _ := targetDB.Prepare(insertSQLStr)
+
+				_, err = stmt.Exec(values...)
+				_ = stmt.Close()
 				if err != nil {
 					fmt.Println(err)
 				}
 			}
 
-			_ = rows.Close()
-
 			pageEndTime := time.Now()
-			fmt.Println("🕒", pageEndTime.Sub(pageStartTime))
+			fmt.Println("🕒", pageEndTime.Sub(pageStartTime), "/", pageEndTime.Sub(migrateStartTime))
 		}
 
 		tableEndTime := time.Now()
-		fmt.Println("🕒", table, tableEndTime.Sub(tableStartTime))
+		fmt.Println("🕒", table, tableEndTime.Sub(tableStartTime), "/", tableEndTime.Sub(migrateStartTime))
 	}
 
 	fmt.Println("All Done")
